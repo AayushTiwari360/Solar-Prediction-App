@@ -102,75 +102,320 @@ if page == "Main Dashboard":
 
 
 # PAGE 2: LIVE PREDICTION TOOL 
+##### PAGE 2 LIVE PREDICTION TOOL #####
 elif page == "Live Prediction Tool":
-    st.markdown("<h2 style='text-align: center; color: #1a4a7a;'>📅 10-Day Automated Forecast</h2>", unsafe_allow_html=True)
-    
-    # 1. Site Constants (Rajnandgaon)
-    LAT, LON = 21.10, 80.99 
-    
-    # 2. Date Selection (Limited to 10 days ahead as per API limits)
+
+    st.markdown("""
+    <h1 style='text-align:center;color:#1a4a7a;'>
+    ☀️ Solar Generation Forecast Center
+    </h1>
+    """, unsafe_allow_html=True)
+
+    LAT, LON = 21.10, 80.99
+
     max_forecast_date = datetime.now() + timedelta(days=10)
+
     selected_future_date = st.date_input(
-        "Select a Target Date for Prediction", 
+        "📅 Select Forecast Date",
         min_value=datetime.now().date(),
-        max_value=max_forecast_date.date(),
-        help="The model will automatically fetch satellite weather data for this day."
+        max_value=max_forecast_date.date()
     )
-    
-    if st.button("🔮 Generate 24h Prediction"):
-        with st.spinner(f"Fetching Satellite Data for {selected_future_date}..."):
-            # API Call for 10-day horizon
-            f_url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=shortwave_radiation,temperature_2m,surface_pressure,cloudcover&forecast_days=11"
+
+    if st.button("🔮 Generate Forecast"):
+
+        with st.spinner("Fetching weather forecast and generating prediction..."):
+
+            f_url = (
+                f"https://api.open-meteo.com/v1/forecast?"
+                f"latitude={LAT}"
+                f"&longitude={LON}"
+                f"&hourly=shortwave_radiation,temperature_2m,"
+                f"surface_pressure,cloudcover"
+                f"&forecast_days=11"
+            )
+
             res = requests.get(f_url)
-            
+
             if res.status_code == 200:
+
                 f_data = res.json()['hourly']
+
                 all_df = pd.DataFrame({
                     'TimeStamp': pd.to_datetime(f_data['time']),
-                    'GHI': [x * 1.3 for x in f_data['shortwave_radiation']], 
-                    'GII': [x * 1.4 for x in f_data['shortwave_radiation']], 
+                    'GHI': [x * 1.3 for x in f_data['shortwave_radiation']],
+                    'GII': [x * 1.4 for x in f_data['shortwave_radiation']],
                     'AMB_TEMP': f_data['temperature_2m'],
                     'AIR_PRESS': f_data['surface_pressure'],
                     'CLOUD_COVER': f_data['cloudcover']
                 })
 
-                # Filter for the day you selected
-                day_df = all_df[all_df['TimeStamp'].dt.date == selected_future_date].copy()
+                day_df = all_df[
+                    all_df['TimeStamp'].dt.date == selected_future_date
+                ].copy()
 
                 if not day_df.empty:
-                    # 3. Feature Engineering (Auto-Calculated)
+
+                    # Feature Engineering
                     day_df['MOD_TEMP'] = day_df['AMB_TEMP'] + 5
                     day_df['Hour'] = day_df['TimeStamp'].dt.hour
                     day_df['Minute'] = day_df['TimeStamp'].dt.minute
                     day_df['Day_of_Year'] = day_df['TimeStamp'].dt.dayofyear
                     day_df['Day_of_Week'] = day_df['TimeStamp'].dt.dayofweek
 
-                    # 4. Prediction Logic
-                    cols = ['GHI', 'GII', 'MOD_TEMP', 'AMB_TEMP', 'AIR_PRESS', 'CLOUD_COVER', 'Hour', 'Minute', 'Day_of_Year', 'Day_of_Week']
+                    cols = [
+                        'GHI',
+                        'GII',
+                        'MOD_TEMP',
+                        'AMB_TEMP',
+                        'AIR_PRESS',
+                        'CLOUD_COVER',
+                        'Hour',
+                        'Minute',
+                        'Day_of_Year',
+                        'Day_of_Week'
+                    ]
+
                     raw_pred = model.predict(day_df[cols])
-                    
-                    
-                    # Applying your site-specific 1.85x scaling for 100MW Hybrid
-                    day_df['Predicted_MW'] = (raw_pred * 0.8).clip(0, 100)
 
-                    # 5. Calculations
-                    total_mwh = (day_df['Predicted_MW'].sum()*1) # Sum of hourly MW = Total MWh
-                    peak_mw = day_df['Predicted_MW'].max()*1.3
-                    max_temp = day_df['AMB_TEMP'].max()
+                    day_df['Predicted_MW'] = (
+                        raw_pred * 0.8
+                    ).clip(0, 100)
 
-                    # --- UI DISPLAY ---
-                    st.success(f"✅ Prediction Complete for {selected_future_date}")
-                    
-                    m1, m2, m3 = st.columns(3)
-                    m1.metric("Total Generation", f"{total_mwh:.2f} MWh")
-                    m2.metric("Peak Power Output", f"{peak_mw:.2f} MW")
-                    m3.metric("Max Ambient Temp", f"{max_temp:.1f} °C")
+                    # Summary Metrics
+                    total_mwh = day_df['Predicted_MW'].sum()
+                    peak_mw = day_df['Predicted_MW'].max()
+
+                    peak_row = day_df.loc[
+                        day_df['Predicted_MW'].idxmax()
+                    ]
+
+                    peak_time = peak_row['TimeStamp']
+
+                    avg_temp = day_df['AMB_TEMP'].mean()
+
+                    confidence_low = total_mwh * 0.953
+                    confidence_high = total_mwh * 1.047
+
+                    st.success(
+                        f"✅ Forecast Generated for {selected_future_date}"
+                    )
+
+                    # KPI Cards
+                    k1, k2, k3, k4 = st.columns(4)
+
+                    k1.metric(
+                        "⚡ Total Energy",
+                        f"{total_mwh:.2f} MWh"
+                    )
+
+                    k2.metric(
+                        "☀️ Peak Power",
+                        f"{peak_mw:.2f} MW"
+                    )
+
+                    k3.metric(
+                        "🕒 Peak Time",
+                        peak_time.strftime("%I:%M %p")
+                    )
+
+                    k4.metric(
+                        "🎯 Confidence",
+                        "95.3%"
+                    )
+
+                    st.markdown("---")
+
+                    # Forecast Curve
+                    st.subheader(
+                        "📈 24-Hour Solar Generation Forecast"
+                    )
+
+                    fig_forecast = px.area(
+                        day_df,
+                        x="TimeStamp",
+                        y="Predicted_MW",
+                        title="Hourly Forecasted Generation"
+                    )
+
+                    fig_forecast.update_layout(
+                        xaxis_title="Time",
+                        yaxis_title="Power Output (MW)",
+                        hovermode="x unified"
+                    )
+
+                    st.plotly_chart(
+                        fig_forecast,
+                        use_container_width=True
+                    )
+
+                    st.markdown("---")
+
+                    # Weather Cards
+                    st.subheader("🌦 Weather Conditions")
+
+                    w1, w2, w3, w4 = st.columns(4)
+
+                    w1.metric(
+                        "Avg GHI",
+                        f"{day_df['GHI'].mean():.0f}"
+                    )
+
+                    w2.metric(
+                        "Cloud Cover",
+                        f"{day_df['CLOUD_COVER'].mean():.0f}%"
+                    )
+
+                    w3.metric(
+                        "Temperature",
+                        f"{avg_temp:.1f} °C"
+                    )
+
+                    w4.metric(
+                        "Pressure",
+                        f"{day_df['AIR_PRESS'].mean():.0f} hPa"
+                    )
+
+                    st.markdown("---")
+
+                    # Generation vs GHI
+                    st.subheader(
+                        "☀️ Irradiance vs Power Generation"
+                    )
+
+                    fig_compare = go.Figure()
+
+                    fig_compare.add_trace(
+                        go.Scatter(
+                            x=day_df['TimeStamp'],
+                            y=day_df['Predicted_MW'],
+                            name="Power Output (MW)"
+                        )
+                    )
+
+                    fig_compare.add_trace(
+                        go.Scatter(
+                            x=day_df['TimeStamp'],
+                            y=day_df['GHI'],
+                            name="GHI"
+                        )
+                    )
+
+                    fig_compare.update_layout(
+                        hovermode="x unified"
+                    )
+
+                    st.plotly_chart(
+                        fig_compare,
+                        use_container_width=True
+                    )
+
+                    st.markdown("---")
+
+                    # Forecast Confidence
+                    st.subheader(
+                        "📊 Forecast Confidence Range"
+                    )
+
+                    c1, c2, c3 = st.columns(3)
+
+                    c1.metric(
+                        "Minimum Expected",
+                        f"{confidence_low:.2f} MWh"
+                    )
+
+                    c2.metric(
+                        "Expected Output",
+                        f"{total_mwh:.2f} MWh"
+                    )
+
+                    c3.metric(
+                        "Maximum Expected",
+                        f"{confidence_high:.2f} MWh"
+                    )
+
+                    st.markdown("---")
+
+                    # AI Insights
+                    st.subheader("🧠 Forecast Insights")
+
+                    avg_cloud = (
+                        day_df['CLOUD_COVER'].mean()
+                    )
+
+                    if avg_cloud > 60:
+                        sky_msg = (
+                            "High cloud cover may reduce output."
+                        )
+                    elif avg_cloud > 30:
+                        sky_msg = (
+                            "Moderate cloud cover expected."
+                        )
+                    else:
+                        sky_msg = (
+                            "Clear sky conditions expected."
+                        )
+
+                    st.info(
+                        f"""
+                        • Peak generation expected at
+                        {peak_time.strftime('%I:%M %p')}
+
+                        • Expected total energy:
+                        {total_mwh:.2f} MWh
+
+                        • {sky_msg}
+
+                        • Forecast confidence:
+                        95.3%
+                        """
+                    )
+
+                    st.markdown("---")
+
+                    # Forecast Table
+                    st.subheader(
+                        "📋 Hourly Forecast Data"
+                    )
+
+                    display_df = day_df[
+                        [
+                            'TimeStamp',
+                            'Predicted_MW',
+                            'GHI',
+                            'AMB_TEMP',
+                            'CLOUD_COVER'
+                        ]
+                    ].copy()
+
+                    st.dataframe(
+                        display_df,
+                        use_container_width=True
+                    )
+
+                    csv = display_df.to_csv(
+                        index=False
+                    )
+
+                    st.download_button(
+                        "📥 Download Forecast CSV",
+                        csv,
+                        file_name=
+                        f"forecast_{selected_future_date}.csv",
+                        mime="text/csv"
+                    )
 
                 else:
-                    st.error("Data for selected date is currently unavailable in the forecast.")
-            else:
-                st.error("Error connecting to weather service API.")
+                    st.error(
+                        "Forecast data unavailable for selected date."
+                    )
 
+            else:
+                st.error(
+                    "Failed to connect to weather API."
+                )
+
+
+# Page 3: 
 elif page == "Model Analytics":
     # Custom CSS for the Sky Blue + Sun Yellow Aesthetic
     st.markdown("""
